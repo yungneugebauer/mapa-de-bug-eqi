@@ -8,6 +8,11 @@
 // Como os dados ficam guardados aqui (fora do index.html), trocar a
 // versão do arquivo no futuro NUNCA apaga o histórico — o arquivo é só a
 // "tela"; quem guarda os bugs é este banco de dados.
+//
+// Formato de comando: em vez de usar os atalhos de URL (/set/chave,
+// /get/chave), mandamos o comando como um array JSON no corpo da
+// requisição pro endereço base — é a forma que a própria Upstash recomenda
+// como mais robusta.
 
 const KEY = 'bughunter:store';
 
@@ -33,13 +38,28 @@ function getCredentials() {
 
   if (!token) {
     // Evita pegar a variável de "read only token" por engano — precisamos
-    // do token com permissão de escrita (usado no /set).
+    // do token com permissão de escrita (usado no SET).
     const tokenKey = keys.find(k => /(^|_)KV_REST_API_TOKEN$/.test(k) && !/READ_ONLY/i.test(k)) ||
       keys.find(k => /(^|_)REDIS_REST_TOKEN$/.test(k) && !/READ_ONLY/i.test(k));
     if (tokenKey) token = env[tokenKey];
   }
 
   return { url, token };
+}
+
+async function upstash(url, token, command) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  });
+  const text = await r.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (e) { /* resposta não era JSON */ }
+  return { ok: r.ok, status: r.status, text, json };
 }
 
 module.exports = async function handler(req, res) {
@@ -49,23 +69,26 @@ module.exports = async function handler(req, res) {
   if (!url || !token) {
     res.status(500).json({
       error:
-        'Storage não configurado. No projeto da Vercel, vá em Storage e adicione a integração "Upstash for Redis" (Marketplace), depois faça um novo deploy.',
+        'Storage não configurado. No projeto da Vercel, vá em Storage e adicione a integração de banco de dados (Upstash/Redis), depois faça um novo deploy.',
     });
     return;
   }
 
   try {
     if (req.method === 'GET') {
-      const r = await fetch(`${url}/get/${KEY}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const r = await upstash(url, token, ['GET', KEY]);
       if (!r.ok) {
-        const detail = await r.text();
-        res.status(502).json({ error: 'Falha ao ler do banco', detail });
+        res.status(502).json({ error: 'Falha ao ler do banco', status: r.status, detail: r.text });
         return;
       }
-      const json = await r.json();
-      const value = json.result ? JSON.parse(json.result) : { components: [], bugs: [] };
+      const raw = r.json ? r.json.result : null;
+      let value;
+      try {
+        value = raw ? JSON.parse(raw) : { components: [], bugs: [] };
+      } catch (e) {
+        res.status(502).json({ error: 'Dado salvo no banco não é um JSON válido', detail: String(raw).slice(0, 300) });
+        return;
+      }
       res.status(200).json(value);
       return;
     }
@@ -85,17 +108,9 @@ module.exports = async function handler(req, res) {
       }
 
       const serialized = JSON.stringify(body);
-      const r = await fetch(`${url}/set/${KEY}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'text/plain',
-        },
-        body: serialized,
-      });
-      if (!r.ok) {
-        const detail = await r.text();
-        res.status(502).json({ error: 'Falha ao salvar no banco', detail });
+      const r = await upstash(url, token, ['SET', KEY, serialized]);
+      if (!r.ok || (r.json && r.json.result !== 'OK')) {
+        res.status(502).json({ error: 'Falha ao salvar no banco', status: r.status, detail: r.text });
         return;
       }
       res.status(200).json({ ok: true });
