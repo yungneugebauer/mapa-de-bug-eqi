@@ -232,6 +232,15 @@
     padding-right: 8px;
   }
   .btn.danger:hover{ background: var(--tint-error); }
+  .btn.naked-brand{
+    /* Button variant=naked, na cor da marca, pra ação secundária inline */
+    background: transparent;
+    color: var(--content-brand);
+    border-color: transparent;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .btn.naked-brand:hover{ background: var(--bg-brand-light); }
   .btn.danger.confirming{
     background: var(--alert-error);
     color: var(--content-always-light);
@@ -1029,7 +1038,7 @@
             <select class="status-select" data-bugid="${bug.id}">
               ${STATUSES.map(s=>`<option ${s===bug.status?'selected':''}>${s}</option>`).join('')}
             </select>
-            <button type="button" class="btn small secondary edit-bug" data-bugid="${bug.id}">Editar</button>
+            <button type="button" class="btn small naked-brand edit-bug" data-bugid="${bug.id}">Editar</button>
             <button type="button" class="btn small danger del-bug" data-bugid="${bug.id}">Excluir</button>
           </div>
         </div>
