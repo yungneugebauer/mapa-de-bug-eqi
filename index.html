@@ -509,11 +509,14 @@
     position: fixed;
     bottom: 20px;
     right: 20px;
+    max-width: 420px;
     background: var(--bg-brand);
     color: var(--content-always-light);
     padding: 11px 16px;
     border-radius: var(--radius-2xs);
     font-size: var(--fs-label-l);
+    line-height: 1.4;
+    white-space: pre-wrap;
     box-shadow: var(--shadow);
     opacity: 0;
     transform: translateY(8px);
@@ -789,11 +792,12 @@
 
   function slugStatus(s){ return s.toLowerCase().replace(/\s+/g,'-').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 
-  function toast(msg){
+  function toast(msg, duration){
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.classList.add('show');
-    setTimeout(()=> t.classList.remove('show'), 2200);
+    clearTimeout(t._hideTimer);
+    t._hideTimer = setTimeout(()=> t.classList.remove('show'), duration || 2200);
   }
 
   // ---------- Upload de imagem (opcional) ----------
@@ -906,22 +910,25 @@
 
   async function loadAll(){
     let loadFailed = false;
+    let loadErrorDetail = '';
     try{
       if(HAS_ARTIFACT_STORAGE){
         const res = await window.storage.get(STORE_KEY, true);
         state.data = res && res.value ? JSON.parse(res.value) : { components: [], bugs: [] };
       } else {
-        const r = await fetch('/api/data');
+        const r = await fetch('/api/data', { cache: 'no-store' });
         if(r.ok){
           state.data = await r.json();
         } else {
           loadFailed = true;
           state.data = { components: [], bugs: [] };
-          console.error('GET /api/data retornou status', r.status);
+          try{ loadErrorDetail = JSON.stringify(await r.json()); }catch(e){ loadErrorDetail = `status ${r.status}`; }
+          console.error('GET /api/data retornou status', r.status, loadErrorDetail);
         }
       }
     }catch(e){
       loadFailed = true;
+      loadErrorDetail = e.message || String(e);
       console.error('Falha ao carregar dados', e);
       state.data = { components: [], bugs: [] };
     }
@@ -929,7 +936,7 @@
       // Nunca gravamos nada no banco quando o carregamento falhou — só
       // trabalhamos com um estado vazio nesta sessão, sem persistir isso,
       // pra uma instabilidade de rede nunca apagar dados de verdade.
-      toast('Não consegui carregar os dados salvos agora. Tente recarregar a página.');
+      toast('Não consegui carregar os dados salvos: ' + loadErrorDetail, 8000);
       if(!Array.isArray(state.data.pages)) state.data.pages = ['Minhas finanças', 'EQI Research'];
     } else if(!Array.isArray(state.data.pages) || state.data.pages.length === 0){
       // Migração: dados salvos antes da lista de páginas ser dinâmica.
@@ -956,17 +963,40 @@
     try{
       if(HAS_ARTIFACT_STORAGE){
         await window.storage.set(STORE_KEY, JSON.stringify(state.data), true);
-      } else {
-        const r = await fetch('/api/data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(state.data),
-        });
-        if(!r.ok) throw new Error('resposta não OK da API');
+        return;
+      }
+
+      const r = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state.data),
+      });
+      if(!r.ok){
+        let detail = '';
+        try{ detail = JSON.stringify(await r.json()); }catch(e){ detail = await r.text().catch(()=> ''); }
+        throw new Error(`API respondeu ${r.status} ao salvar. ${detail}`.trim());
+      }
+
+      // Autoverificação: lê de volta o que acabou de ser gravado, pra
+      // garantir que o banco realmente ficou com o dado que mandamos —
+      // em vez de simplesmente confiar que "200 OK" significa sucesso.
+      const check = await fetch('/api/data', { cache: 'no-store' });
+      if(!check.ok){
+        toast('Salvei, mas não consegui reconferir o banco depois (a leitura falhou). Recarregue a página em alguns segundos pra confirmar.', 6000);
+        return;
+      }
+      const serverData = await check.json();
+      const sentBugs = state.data.bugs.length;
+      const serverBugs = Array.isArray(serverData.bugs) ? serverData.bugs.length : -1;
+      const sentComps = state.data.components.length;
+      const serverComps = Array.isArray(serverData.components) ? serverData.components.length : -1;
+      if(serverBugs !== sentBugs || serverComps !== sentComps){
+        console.warn('Divergência após salvar:', { sentBugs, serverBugs, sentComps, serverComps, serverData });
+        toast(`Atenção: enviei ${sentBugs} bug(s)/${sentComps} mapeamento(s), mas o banco ficou com ${serverBugs}/${serverComps}. O salvamento não está confiável — me avise com esse número.`, 8000);
       }
     }catch(e){
       console.error('Falha ao salvar dados', e);
-      toast('Não consegui salvar. Tente de novo.');
+      toast('Não consegui salvar: ' + (e.message || 'erro desconhecido'), 8000);
     }
   }
 
