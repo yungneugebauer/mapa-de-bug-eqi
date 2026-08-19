@@ -905,20 +905,35 @@
   const HAS_ARTIFACT_STORAGE = (typeof window !== 'undefined' && !!window.storage);
 
   async function loadAll(){
+    let loadFailed = false;
     try{
       if(HAS_ARTIFACT_STORAGE){
         const res = await window.storage.get(STORE_KEY, true);
         state.data = res && res.value ? JSON.parse(res.value) : { components: [], bugs: [] };
       } else {
         const r = await fetch('/api/data');
-        state.data = r.ok ? await r.json() : { components: [], bugs: [] };
+        if(r.ok){
+          state.data = await r.json();
+        } else {
+          loadFailed = true;
+          state.data = { components: [], bugs: [] };
+          console.error('GET /api/data retornou status', r.status);
+        }
       }
     }catch(e){
+      loadFailed = true;
       console.error('Falha ao carregar dados', e);
       state.data = { components: [], bugs: [] };
     }
-    // Migração: dados salvos antes da lista de páginas ser dinâmica
-    if(!Array.isArray(state.data.pages) || state.data.pages.length === 0){
+    if(loadFailed){
+      // Nunca gravamos nada no banco quando o carregamento falhou — só
+      // trabalhamos com um estado vazio nesta sessão, sem persistir isso,
+      // pra uma instabilidade de rede nunca apagar dados de verdade.
+      toast('Não consegui carregar os dados salvos agora. Tente recarregar a página.');
+      if(!Array.isArray(state.data.pages)) state.data.pages = ['Minhas finanças', 'EQI Research'];
+    } else if(!Array.isArray(state.data.pages) || state.data.pages.length === 0){
+      // Migração: dados salvos antes da lista de páginas ser dinâmica.
+      // Só roda quando o carregamento deu certo de verdade.
       state.data.pages = ['Minhas finanças', 'EQI Research'];
       await persistData();
     }
