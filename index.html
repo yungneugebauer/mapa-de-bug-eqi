@@ -400,7 +400,7 @@
     cursor:pointer;
     padding: 4px 0;
   }
-  .bug-image-attachment{ margin-top: 10px; }
+  .bug-image-attachment{ margin-top: 10px; cursor: zoom-in; }
   .bug-image-attachment img{
     max-width: 100%;
     max-height: 320px;
@@ -830,6 +830,30 @@
     box.querySelector('.img-preview-remove').addEventListener('click', onRemove);
   }
 
+  // Abre uma imagem (data URL) em nova aba. Navegadores bloqueiam navegação
+  // direta pra data: URLs via <a target="_blank">, então convertemos pra um
+  // Blob e usamos a URL temporária dele, que abre normalmente.
+  function openImageInNewTab(dataUrl){
+    try{
+      const [header, base64] = dataUrl.split(',');
+      const mimeMatch = header.match(/data:(.*?);base64/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const byteChars = atob(base64);
+      const byteNumbers = new Uint8Array(byteChars.length);
+      for(let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteNumbers], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const win = window.open(blobUrl, '_blank');
+      if(!win){
+        toast('Não consegui abrir em nova aba — verifique o bloqueador de pop-up.');
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    }catch(err){
+      console.error(err);
+      toast('Não consegui abrir essa imagem.');
+    }
+  }
+
   // Confirmação de ações destrutivas feita dentro da própria UI: o diálogo
   // nativo confirm() é bloqueado no sandbox onde o artifact roda, então
   // usamos "clique de novo pra confirmar" em vez disso.
@@ -1012,21 +1036,21 @@
           <p>${escapeHtml(bug.description || '(sem descrição)')}</p>
           ${bug.image ? `
           <div class="field-label">Print do bug</div>
-          <div class="bug-image-attachment"><a href="${bug.image}" target="_blank" rel="noopener"><img src="${bug.image}" alt="Print do bug" /></a></div>
+          <div class="bug-image-attachment" data-bugid="${bug.id}" data-field="image"><img src="${bug.image}" alt="Print do bug" /></div>
           ` : ''}
           ${bug.resolution ? `
           <div class="field-label">O que foi feito (resolução)${bug.resolvedBy ? ' · por ' + escapeHtml(bug.resolvedBy) : ''}</div>
           <p>${escapeHtml(bug.resolution)}</p>
           ` : ''}
           ${bug.resolutionImage ? `
-          <div class="bug-image-attachment"><a href="${bug.resolutionImage}" target="_blank" rel="noopener"><img src="${bug.resolutionImage}" alt="Print da resolução" /></a></div>
+          <div class="bug-image-attachment" data-bugid="${bug.id}" data-field="resolutionImage"><img src="${bug.resolutionImage}" alt="Print da resolução" /></div>
           ` : ''}
           ${bug.notExistsReason ? `
           <div class="field-label">Motivo (não existente)${bug.notExistsBy ? ' · por ' + escapeHtml(bug.notExistsBy) : ''}</div>
           <p>${escapeHtml(bug.notExistsReason)}</p>
           ` : ''}
           ${bug.notExistsImage ? `
-          <div class="bug-image-attachment"><a href="${bug.notExistsImage}" target="_blank" rel="noopener"><img src="${bug.notExistsImage}" alt="Print do motivo" /></a></div>
+          <div class="bug-image-attachment" data-bugid="${bug.id}" data-field="notExistsImage"><img src="${bug.notExistsImage}" alt="Print do motivo" /></div>
           ` : ''}
         </div>
       </div>
@@ -1152,6 +1176,14 @@
 
     wrap.querySelectorAll('.bug-title').forEach(el => {
       el.addEventListener('click', () => document.getElementById('body-' + el.dataset.toggle).classList.toggle('open'));
+    });
+    wrap.querySelectorAll('.bug-image-attachment').forEach(el => {
+      el.addEventListener('click', () => {
+        const bug = state.data.bugs.find(b => b.id === el.dataset.bugid);
+        if(!bug) return;
+        const dataUrl = bug[el.dataset.field];
+        if(dataUrl) openImageInNewTab(dataUrl);
+      });
     });
     wrap.querySelectorAll('.status-select').forEach(el => {
       el.addEventListener('change', async () => {
@@ -1280,14 +1312,16 @@
   document.getElementById('confirmResolve').addEventListener('click', async () => {
     const cfg = STATUS_NOTE_CONFIG[pendingStatus];
     const note = document.getElementById('resolveNote').value.trim();
+    const byName = document.getElementById('resolveByInput').value.trim();
     if(!note){ toast(cfg.emptyMsg); return; }
+    if(!byName){ toast(`Preencha "${cfg.byLabel}" antes de salvar.`); document.getElementById('resolveByInput').focus(); return; }
     const bug = state.data.bugs.find(b => b.id === pendingStatusBugId);
     if(bug){
       bug.status = pendingStatus;
       bug[cfg.field] = note;
       bug[cfg.atField] = Date.now();
       bug[cfg.imageField] = pendingResolveImage || null;
-      bug[cfg.byField] = document.getElementById('resolveByInput').value.trim() || 'anônimo';
+      bug[cfg.byField] = byName;
       await persistData();
     }
     pendingStatusBugId = null;
@@ -1437,6 +1471,12 @@
   }
 
   document.getElementById('newCompBtn').addEventListener('click', () => {
+    const reporterName = document.getElementById('reporterInput').value.trim();
+    if(!reporterName){
+      toast('Preencha seu nome em "Relator" antes de criar um bug.');
+      document.getElementById('reporterInput').focus();
+      return;
+    }
     clearModalForm();
     showModalStep(1);
     newCompModal.classList.add('open');
@@ -1492,6 +1532,8 @@
     const page = document.getElementById('newCompPage').value;
     const component = document.getElementById('newCompComponent').value.trim();
     const title = document.getElementById('f_title').value.trim();
+    const reporterName = document.getElementById('reporterInput').value.trim();
+    if(!reporterName){ toast('Preencha seu nome em "Relator" antes de criar um bug.'); newCompModal.classList.remove('open'); document.getElementById('reporterInput').focus(); return; }
     if(!page){ toast('Selecione a página.'); showModalStep(1); return; }
     if(!title){ toast('Dá um título pro bug.'); return; }
 
@@ -1512,7 +1554,7 @@
       description: document.getElementById('f_desc').value.trim(),
       severity: document.getElementById('f_sev').value,
       status: 'Aberto',
-      reporter: state.reporterName || 'anônimo',
+      reporter: reporterName,
       createdAt: Date.now(),
       image: pendingNewBugImage || null,
     };
