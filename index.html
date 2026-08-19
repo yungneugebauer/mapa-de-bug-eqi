@@ -586,7 +586,7 @@
 <!-- Modal: novo bug — localiza/cria o mapeamento (Formato > Página > Componente) e já reporta o bug -->
 <div class="modal-overlay" id="newCompModal">
   <div class="modal-box">
-    <h3>Novo Bug</h3>
+    <h3 id="newCompModalTitle">Novo Bug</h3>
 
     <!-- Passo 1: onde o bug acontece -->
     <div class="modal-step active" id="modalStep1">
@@ -766,6 +766,7 @@
     reporterName: '',
   };
   let pendingNewBugImage = null;
+  let editingBugId = null;
 
   function uid(){
     return (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2));
@@ -1028,6 +1029,7 @@
             <select class="status-select" data-bugid="${bug.id}">
               ${STATUSES.map(s=>`<option ${s===bug.status?'selected':''}>${s}</option>`).join('')}
             </select>
+            <button type="button" class="btn small secondary edit-bug" data-bugid="${bug.id}">Editar</button>
             <button type="button" class="btn small danger del-bug" data-bugid="${bug.id}">Excluir</button>
           </div>
         </div>
@@ -1080,6 +1082,7 @@
 
     const candidates = bugsFor(comp.id)
       .filter(b => b.status !== 'Resolvido' && b.status !== 'Não existente')
+      .filter(b => b.id !== editingBugId)
       .map(b => ({ bug: b, score: jaccard(tokens, normalizeTokens(b.title + ' ' + b.description)) }))
       .filter(x => x.score > 0.22)
       .sort((a,b)=> b.score - a.score)
@@ -1111,6 +1114,40 @@
     document.getElementById('newBugImage').value = '';
     pendingNewBugImage = null;
     renderImagePreview('newBugImagePreview', null);
+    editingBugId = null;
+    document.getElementById('newCompModalTitle').textContent = 'Novo Bug';
+    document.getElementById('confirmNewComp').textContent = 'Salvar bug';
+  }
+
+  function openEditBugModal(bugId){
+    const bug = state.data.bugs.find(b => b.id === bugId);
+    if(!bug) return;
+    const comp = state.data.components.find(c => c.id === bug.componentId);
+    editingBugId = bugId;
+
+    document.getElementById('newCompFormat').value = comp ? comp.format : 'Web';
+    document.getElementById('newCompPage').value = comp ? comp.page : '';
+    document.getElementById('newCompComponent').value = comp ? (comp.component || '') : '';
+    document.getElementById('f_title').value = bug.title || '';
+    document.getElementById('f_desc').value = bug.description || '';
+    document.getElementById('f_sev').value = bug.severity || 'Bloqueante';
+    document.getElementById('dupWarning').classList.remove('show');
+
+    document.getElementById('newBugImage').value = '';
+    pendingNewBugImage = bug.image || null;
+    renderImagePreview('newBugImagePreview', pendingNewBugImage, () => {
+      pendingNewBugImage = null;
+      document.getElementById('newBugImage').value = '';
+      renderImagePreview('newBugImagePreview', null);
+    });
+
+    document.getElementById('newCompModalTitle').textContent = 'Editar bug';
+    document.getElementById('confirmNewComp').textContent = 'Salvar alterações';
+    if(comp) document.getElementById('modalStep2Context').textContent = `${comp.format} · ${comp.page}`;
+
+    newCompModal.classList.add('open');
+    showModalStep(2);
+    document.getElementById('f_title').focus();
   }
 
   // ---------- All bugs view ----------
@@ -1198,6 +1235,9 @@
           toast('Status atualizado.');
         }
       });
+    });
+    wrap.querySelectorAll('.edit-bug').forEach(el => {
+      el.addEventListener('click', () => openEditBugModal(el.dataset.bugid));
     });
     wrap.querySelectorAll('.del-bug').forEach(el => {
       el.addEventListener('click', () => openDeleteBugModal(el.dataset.bugid));
@@ -1482,7 +1522,7 @@
     newCompModal.classList.add('open');
     document.getElementById('newCompPage').focus();
   });
-  document.getElementById('cancelNewComp').addEventListener('click', () => newCompModal.classList.remove('open'));
+  document.getElementById('cancelNewComp').addEventListener('click', () => { newCompModal.classList.remove('open'); clearModalForm(); });
 
   document.getElementById('modalStep1Next').addEventListener('click', () => {
     const format = document.getElementById('newCompFormat').value;
@@ -1532,8 +1572,6 @@
     const page = document.getElementById('newCompPage').value;
     const component = document.getElementById('newCompComponent').value.trim();
     const title = document.getElementById('f_title').value.trim();
-    const reporterName = document.getElementById('reporterInput').value.trim();
-    if(!reporterName){ toast('Preencha seu nome em "Relator" antes de criar um bug.'); newCompModal.classList.remove('open'); document.getElementById('reporterInput').focus(); return; }
     if(!page){ toast('Selecione a página.'); showModalStep(1); return; }
     if(!title){ toast('Dá um título pro bug.'); return; }
 
@@ -1546,6 +1584,29 @@
       comp = { id: uid(), format, page, component, createdAt: Date.now() };
       state.data.components.push(comp);
     }
+
+    if(editingBugId){
+      // Modo edição: atualiza o bug existente, sem mexer em relator/status/histórico
+      const bug = state.data.bugs.find(b => b.id === editingBugId);
+      if(!bug){ toast('Esse bug não existe mais.'); newCompModal.classList.remove('open'); return; }
+      bug.componentId = comp.id;
+      bug.title = title;
+      bug.description = document.getElementById('f_desc').value.trim();
+      bug.severity = document.getElementById('f_sev').value;
+      bug.image = pendingNewBugImage || null;
+      await persistData();
+
+      newCompModal.classList.remove('open');
+      clearModalForm();
+      state.selectedPage = comp.page;
+      document.getElementById('allSearch').value = '';
+      renderAll();
+      toast('Bug atualizado.');
+      return;
+    }
+
+    const reporterName = document.getElementById('reporterInput').value.trim();
+    if(!reporterName){ toast('Preencha seu nome em "Relator" antes de criar um bug.'); newCompModal.classList.remove('open'); document.getElementById('reporterInput').focus(); return; }
 
     const bug = {
       id: uid(),
