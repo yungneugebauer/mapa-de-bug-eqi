@@ -1584,6 +1584,16 @@
     if(!page){ toast('Selecione a página.'); showModalStep(1); return; }
     if(!title){ toast('Dá um título pro bug.'); return; }
 
+    const reporterName = document.getElementById('reporterInput').value.trim();
+    if(!editingBugId && !reporterName){
+      toast('Preencha seu nome em "Relator" antes de criar um bug.');
+      newCompModal.classList.remove('open');
+      document.getElementById('reporterInput').focus();
+      return;
+    }
+
+    // Só a partir daqui mexemos no estado — todas as validações já passaram,
+    // então nunca sobra um mapeamento criado sem o bug correspondente.
     // Reaproveita o mapeamento se format+página+componente já existir, em vez de duplicar na sidebar
     const normComponent = component.toLowerCase();
     let comp = state.data.components.find(c =>
@@ -1613,9 +1623,6 @@
       toast('Bug atualizado.');
       return;
     }
-
-    const reporterName = document.getElementById('reporterInput').value.trim();
-    if(!reporterName){ toast('Preencha seu nome em "Relator" antes de criar um bug.'); newCompModal.classList.remove('open'); document.getElementById('reporterInput').focus(); return; }
 
     const bug = {
       id: uid(),
