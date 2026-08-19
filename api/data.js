@@ -43,6 +43,7 @@ function getCredentials() {
 }
 
 module.exports = async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   const { url, token } = getCredentials();
 
   if (!url || !token) {
