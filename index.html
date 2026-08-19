@@ -536,7 +536,7 @@
       <span class="brand-mark">QA - Lançamentos</span>
     </div>
     <h1 class="title">Mapa de Bugs</h1>
-    <p class="subtitle">Dados compartilhados com todo o time.</p>
+    <p class="subtitle">Dados compartilhados com todo o time. <span id="buildTag" style="opacity:.65;">build v7</span></p>
 
     <div class="reporter-row no-divider">
       <label for="reporterInput">Relator</label>
@@ -966,10 +966,21 @@
         return;
       }
 
+      const payload = JSON.stringify(state.data);
+
+      // O banco tem limite de tamanho por requisição. Se o payload passar
+      // disso (normalmente por causa de prints anexados), avisamos em vez
+      // de deixar o salvamento falhar de forma silenciosa.
+      const sizeMB = payload.length / (1024 * 1024);
+      if(sizeMB > 0.9){
+        toast(`Os dados estão com ${sizeMB.toFixed(1)}MB — grande demais pro banco salvar de uma vez. Remova algum print anexado e tente de novo.`, 9000);
+        return;
+      }
+
       const r = await fetch('/api/data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state.data),
+        body: payload,
       });
       if(!r.ok){
         let detail = '';
