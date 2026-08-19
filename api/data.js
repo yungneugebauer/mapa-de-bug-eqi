@@ -12,13 +12,33 @@
 const KEY = 'bughunter:store';
 
 function getCredentials() {
-  const url =
-    process.env.KV_REST_API_URL ||
-    process.env.UPSTASH_REDIS_REST_URL ||
-    process.env.REDIS_URL;
-  const token =
-    process.env.KV_REST_API_TOKEN ||
-    process.env.UPSTASH_REDIS_REST_TOKEN;
+  const env = process.env;
+
+  // Tenta primeiro os nomes padrão (sem prefixo customizado)
+  let url = env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL || env.REDIS_URL;
+  let token = env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN;
+  if (url && token) return { url, token };
+
+  // Fallback: a Vercel permite configurar um "Custom Environment Variable
+  // Prefix" ao conectar o banco (ex: STORAGE_KV_REST_API_URL em vez de
+  // KV_REST_API_URL). Em vez de depender de um nome fixo, procuramos por
+  // qualquer variável cujo nome termine com o padrão esperado.
+  const keys = Object.keys(env);
+
+  if (!url) {
+    const urlKey = keys.find(k => /(^|_)KV_REST_API_URL$/.test(k)) ||
+      keys.find(k => /(^|_)REDIS_REST_URL$/.test(k) && !/READ_ONLY/i.test(k));
+    if (urlKey) url = env[urlKey];
+  }
+
+  if (!token) {
+    // Evita pegar a variável de "read only token" por engano — precisamos
+    // do token com permissão de escrita (usado no /set).
+    const tokenKey = keys.find(k => /(^|_)KV_REST_API_TOKEN$/.test(k) && !/READ_ONLY/i.test(k)) ||
+      keys.find(k => /(^|_)REDIS_REST_TOKEN$/.test(k) && !/READ_ONLY/i.test(k));
+    if (tokenKey) token = env[tokenKey];
+  }
+
   return { url, token };
 }
 
