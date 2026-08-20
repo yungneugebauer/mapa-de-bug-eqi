@@ -1112,6 +1112,10 @@
           </div>
         </div>
         <div class="bug-body" id="body-${bug.id}">
+          ${comp && comp.component ? `
+          <div class="field-label">Componente</div>
+          <p>${escapeHtml(comp.component)}</p>
+          ` : ''}
           <div class="field-label">Descrição / passos</div>
           <p>${escapeHtml(bug.description || '(sem descrição)')}</p>
           ${bug.image ? `
@@ -1596,6 +1600,10 @@
       return;
     }
     clearModalForm();
+    // Se o usuário já está dentro de uma página, ela vem pré-selecionada
+    if(state.selectedPage && state.data.pages.includes(state.selectedPage)){
+      document.getElementById('newCompPage').value = state.selectedPage;
+    }
     showModalStep(1);
     newCompModal.classList.add('open');
     document.getElementById('newCompPage').focus();
