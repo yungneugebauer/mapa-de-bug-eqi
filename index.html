@@ -544,7 +544,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
-      <span class="brand-mark">QA - EQI</span>
+      <span class="brand-mark">QA - EQI+</span>
     </div>
     <h1 class="title">Mapa de Bugs</h1>
     <p class="subtitle">Dados compartilhados com todo o time.</p>
@@ -948,10 +948,12 @@
       // trabalhamos com um estado vazio nesta sessão, sem persistir isso,
       // pra uma instabilidade de rede nunca apagar dados de verdade.
       toast('Não consegui carregar os dados salvos: ' + loadErrorDetail, 8000);
-      if(!Array.isArray(state.data.pages)) state.data.pages = ['Minhas finanças', 'EQI Research'];
-    } else if(!Array.isArray(state.data.pages) || state.data.pages.length === 0){
-      // Migração: dados salvos antes da lista de páginas ser dinâmica.
-      // Só roda quando o carregamento deu certo de verdade.
+      if(!Array.isArray(state.data.pages)) state.data.pages = [];
+    } else if(!Array.isArray(state.data.pages)){
+      // Migração: dados salvos antes da lista de páginas existir (a chave
+      // "pages" nem existia). Uma lista vazia é um estado válido e não é
+      // tratada como legado — senão as páginas voltariam sozinhas depois
+      // de o time apagar todas.
       state.data.pages = ['Minhas finanças', 'EQI Research'];
       await persistData();
     }
@@ -1717,15 +1719,21 @@
   (async function init(){
     await loadAll();
 
-    // Limpeza única — remove os bugs de "Minhas finanças". Sem botão,
-    // roda sozinho na primeira abertura depois desta atualização.
-    const beforeCount = state.data.bugs.length;
-    state.data.bugs = state.data.bugs.filter(b => {
-      const comp = state.data.components.find(c => c.id === b.componentId);
-      return !(comp && comp.page === 'Minhas finanças');
-    });
-    if(state.data.bugs.length !== beforeCount){
+    // ---- ZERAGEM ÚNICA ----
+    // Limpa TUDO que estiver salvo (bugs, mapeamentos e páginas), inclusive
+    // registros órfãos que não apareciam na tela. Roda uma única vez, na
+    // primeira abertura depois desta atualização, e se marca como concluída
+    // no próprio banco pra não apagar nada que o time criar depois.
+    const RESET_TAG = 'reset-2026-08-20';
+    if(state.data.resetTag !== RESET_TAG){
+      state.data = {
+        components: [],
+        bugs: [],
+        pages: [],
+        resetTag: RESET_TAG,
+      };
       await persistData();
+      populatePageSelect();
     }
 
     renderAll();
