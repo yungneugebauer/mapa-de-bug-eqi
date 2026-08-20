@@ -500,7 +500,18 @@
 
   @media (max-width: 767px){ /* abaixo do breakpoint md (768px) do DS */
     .app{ flex-direction:column; }
-    .sidebar{ width:100%; border-right:none; border-bottom:1px solid var(--border-secondary); max-height: 300px; }
+    .sidebar{
+      width:100%;
+      border-right:none;
+      border-bottom:1px solid var(--border-secondary);
+      max-height:none;   /* altura fixa fazia o conteúdo transbordar sobre a área principal */
+      overflow:visible;
+    }
+    .sidebar .comp-list{
+      flex:none;         /* sem flex:1, senão colapsa quando a sidebar não tem altura definida */
+      max-height:220px;  /* rola só a lista, se tiver muitas páginas */
+      overflow-y:auto;
+    }
     .main{ padding: 18px 16px 60px; }
     .form-grid{ grid-template-columns: 1fr; }
   }
@@ -533,7 +544,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
-      <span class="brand-mark">QA - Lançamentos</span>
+      <span class="brand-mark">QA - EQI</span>
     </div>
     <h1 class="title">Mapa de Bugs</h1>
     <p class="subtitle">Dados compartilhados com todo o time.</p>
