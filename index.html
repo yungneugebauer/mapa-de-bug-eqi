@@ -948,15 +948,8 @@
       // trabalhamos com um estado vazio nesta sessão, sem persistir isso,
       // pra uma instabilidade de rede nunca apagar dados de verdade.
       toast('Não consegui carregar os dados salvos: ' + loadErrorDetail, 8000);
-      if(!Array.isArray(state.data.pages)) state.data.pages = [];
-    } else if(!Array.isArray(state.data.pages)){
-      // Migração: dados salvos antes da lista de páginas existir (a chave
-      // "pages" nem existia). Uma lista vazia é um estado válido e não é
-      // tratada como legado — senão as páginas voltariam sozinhas depois
-      // de o time apagar todas.
-      state.data.pages = ['Minhas finanças', 'EQI Research'];
-      await persistData();
     }
+    state.data = normalizeState(state.data);
     try{
       state.reporterName = localStorage.getItem(REPORTER_KEY) || '';
     }catch(e){ state.reporterName = ''; }
@@ -972,22 +965,30 @@
     if(current && state.data.pages.includes(current)) sel.value = current;
   }
 
-  async function persistData(){
+  /**
+   * Envia uma AÇÃO para o servidor, que a aplica sobre o estado atual do
+   * banco e devolve o resultado já atualizado.
+   *
+   * Antes o navegador mandava a base inteira, e quem salvasse por último
+   * apagava o que a outra pessoa tinha acabado de criar. Mandando só a
+   * ação, o servidor junta tudo e ninguém perde trabalho.
+   */
+  async function sendOp(operation){
+    if(HAS_ARTIFACT_STORAGE){
+      // No ambiente de teste do Claude não existe a API: aplicamos a mesma
+      // operação localmente para o comportamento ficar igual.
+      applyOperationLocally(state.data, operation);
+      try{ await window.storage.set(STORE_KEY, JSON.stringify(state.data), true); }
+      catch(e){ console.error('Falha ao salvar dados', e); toast('Não consegui salvar.', 6000); return false; }
+      return true;
+    }
+
     try{
-      if(HAS_ARTIFACT_STORAGE){
-        await window.storage.set(STORE_KEY, JSON.stringify(state.data), true);
-        return;
-      }
-
-      const payload = JSON.stringify(state.data);
-
-      // O banco tem limite de tamanho por requisição. Se o payload passar
-      // disso (normalmente por causa de prints anexados), avisamos em vez
-      // de deixar o salvamento falhar de forma silenciosa.
+      const payload = JSON.stringify(operation);
       const sizeMB = payload.length / (1024 * 1024);
       if(sizeMB > 0.9){
-        toast(`Os dados estão com ${sizeMB.toFixed(1)}MB — grande demais pro banco salvar de uma vez. Remova algum print anexado e tente de novo.`, 9000);
-        return;
+        toast(`O envio ficou com ${sizeMB.toFixed(1)}MB — grande demais por causa do print anexado. Use uma imagem menor.`, 9000);
+        return false;
       }
 
       const r = await fetch('/api/data', {
@@ -997,30 +998,64 @@
       });
       if(!r.ok){
         let detail = '';
-        try{ detail = JSON.stringify(await r.json()); }catch(e){ detail = await r.text().catch(()=> ''); }
-        throw new Error(`API respondeu ${r.status} ao salvar. ${detail}`.trim());
+        try{ detail = (await r.json()).error || ''; }catch(e){ detail = await r.text().catch(()=> ''); }
+        throw new Error(`${r.status} ${detail}`.trim());
       }
 
-      // Autoverificação: lê de volta o que acabou de ser gravado, pra
-      // garantir que o banco realmente ficou com o dado que mandamos —
-      // em vez de simplesmente confiar que "200 OK" significa sucesso.
-      const check = await fetch('/api/data', { cache: 'no-store' });
-      if(!check.ok){
-        toast('Salvei, mas não consegui reconferir o banco depois (a leitura falhou). Recarregue a página em alguns segundos pra confirmar.', 6000);
-        return;
-      }
-      const serverData = await check.json();
-      const sentBugs = state.data.bugs.length;
-      const serverBugs = Array.isArray(serverData.bugs) ? serverData.bugs.length : -1;
-      const sentComps = state.data.components.length;
-      const serverComps = Array.isArray(serverData.components) ? serverData.components.length : -1;
-      if(serverBugs !== sentBugs || serverComps !== sentComps){
-        console.warn('Divergência após salvar:', { sentBugs, serverBugs, sentComps, serverComps, serverData });
-        toast(`Atenção: enviei ${sentBugs} bug(s)/${sentComps} mapeamento(s), mas o banco ficou com ${serverBugs}/${serverComps}. O salvamento não está confiável — me avise com esse número.`, 8000);
-      }
+      // O servidor devolve o estado consolidado (incluindo o que outras
+      // pessoas fizeram enquanto esta tela estava aberta).
+      state.data = normalizeState(await r.json());
+      return true;
     }catch(e){
-      console.error('Falha ao salvar dados', e);
+      console.error('Falha ao salvar', e);
       toast('Não consegui salvar: ' + (e.message || 'erro desconhecido'), 8000);
+      return false;
+    }
+  }
+
+  function normalizeState(s){
+    const d = s && typeof s === 'object' ? s : {};
+    return {
+      components: Array.isArray(d.components) ? d.components : [],
+      bugs: Array.isArray(d.bugs) ? d.bugs : [],
+      pages: Array.isArray(d.pages) ? d.pages : [],
+    };
+  }
+
+  // Espelho local da lógica do servidor, usado apenas no ambiente de teste
+  // do Claude (onde não existe a API).
+  function applyOperationLocally(data, op){
+    const findOrCreateComp = (c) => {
+      const format = (c.format||'').trim(), page = (c.page||'').trim(), component = (c.component||'').trim();
+      let found = data.components.find(x => x.format===format && x.page===page && (x.component||'').trim().toLowerCase()===component.toLowerCase());
+      if(!found){ found = { id: uid(), format, page, component, createdAt: Date.now() }; data.components.push(found); }
+      return found;
+    };
+    const FIELDS = ['title','description','severity','status','image','resolution','resolvedAt','resolutionImage','resolvedBy','notExistsReason','notExistsAt','notExistsImage','notExistsBy'];
+    const applyFields = (bug, fields) => { if(!fields) return; FIELDS.forEach(k => { if(Object.prototype.hasOwnProperty.call(fields,k)) bug[k]=fields[k]; }); };
+
+    if(op.op === 'createBug'){
+      const comp = findOrCreateComp(op.component||{});
+      const bug = { id: op.bug.id || uid(), componentId: comp.id, reporter: op.bug.reporter||'', createdAt: op.bug.createdAt||Date.now(), status: op.bug.status||'Aberto' };
+      applyFields(bug, op.bug);
+      bug.componentId = comp.id;
+      data.bugs.push(bug);
+    } else if(op.op === 'updateBug'){
+      const bug = data.bugs.find(b => b.id === op.bugId);
+      if(bug){
+        if(op.component) bug.componentId = findOrCreateComp(op.component).id;
+        applyFields(bug, op.fields);
+      }
+    } else if(op.op === 'deleteBug'){
+      data.bugs = data.bugs.filter(b => b.id !== op.bugId);
+    } else if(op.op === 'addPage'){
+      const name = (op.name||'').trim();
+      if(name && !data.pages.some(p => p.toLowerCase() === name.toLowerCase())) data.pages.push(name);
+    } else if(op.op === 'deletePage'){
+      const ids = data.components.filter(c => c.page === op.name).map(c => c.id);
+      data.bugs = data.bugs.filter(b => !ids.includes(b.componentId));
+      data.components = data.components.filter(c => c.page !== op.name);
+      data.pages = data.pages.filter(p => p !== op.name);
     }
   }
 
@@ -1311,10 +1346,9 @@
         if(el.value === 'Resolvido' || el.value === 'Não existente'){
           openStatusNoteModal(bug, el.value);
         } else {
-          bug.status = el.value;
-          await persistData();
+          const ok = await sendOp({ op: 'updateBug', bugId: bug.id, fields: { status: el.value } });
           renderAll();
-          toast('Status atualizado.');
+          if(ok) toast('Status atualizado.');
         }
       });
     });
@@ -1439,12 +1473,12 @@
     if(!byName){ toast(`Preencha "${cfg.byLabel}" antes de salvar.`); document.getElementById('resolveByInput').focus(); return; }
     const bug = state.data.bugs.find(b => b.id === pendingStatusBugId);
     if(bug){
-      bug.status = pendingStatus;
-      bug[cfg.field] = note;
-      bug[cfg.atField] = Date.now();
-      bug[cfg.imageField] = pendingResolveImage || null;
-      bug[cfg.byField] = byName;
-      await persistData();
+      const fields = { status: pendingStatus };
+      fields[cfg.field] = note;
+      fields[cfg.atField] = Date.now();
+      fields[cfg.imageField] = pendingResolveImage || null;
+      fields[cfg.byField] = byName;
+      await sendOp({ op: 'updateBug', bugId: bug.id, fields });
     }
     pendingStatusBugId = null;
     pendingStatus = null;
@@ -1483,12 +1517,11 @@
     const exists = state.data.pages.some(p => p.toLowerCase() === name.toLowerCase());
     if(exists){ toast('Essa página já existe.'); return; }
 
-    state.data.pages.push(name);
-    await persistData();
+    const ok = await sendOp({ op: 'addPage', name });
     newPageModal.classList.remove('open');
     populatePageSelect();
     renderAll();
-    toast('Página criada.');
+    if(ok) toast('Página criada.');
   });
 
   ['newPageName','newPagePassword'].forEach(id => {
@@ -1528,11 +1561,7 @@
       return;
     }
     const pageName = pendingDeletePage;
-    const compIdsToRemove = state.data.components.filter(c => c.page === pageName).map(c => c.id);
-    state.data.bugs = state.data.bugs.filter(b => !compIdsToRemove.includes(b.componentId));
-    state.data.components = state.data.components.filter(c => c.page !== pageName);
-    state.data.pages = state.data.pages.filter(p => p !== pageName);
-    await persistData();
+    await sendOp({ op: 'deletePage', name: pageName });
 
     if(state.selectedPage === pageName){
       state.selectedPage = null;
@@ -1573,12 +1602,11 @@
       document.getElementById('deleteBugPassword').focus();
       return;
     }
-    state.data.bugs = state.data.bugs.filter(b => b.id !== pendingDeleteBugId);
-    await persistData();
+    const ok = await sendOp({ op: 'deleteBug', bugId: pendingDeleteBugId });
     pendingDeleteBugId = null;
     deleteBugModal.classList.remove('open');
     renderAll();
-    toast('Bug excluído.');
+    if(ok) toast('Bug excluído.');
   });
 
   document.getElementById('deleteBugPassword').addEventListener('keydown', (e) => {
@@ -1669,81 +1697,59 @@
       return;
     }
 
-    // Só a partir daqui mexemos no estado — todas as validações já passaram,
-    // então nunca sobra um mapeamento criado sem o bug correspondente.
-    // Reaproveita o mapeamento se format+página+componente já existir, em vez de duplicar na sidebar
-    const normComponent = component.toLowerCase();
-    let comp = state.data.components.find(c =>
-      c.format === format && c.page === page && (c.component||'').trim().toLowerCase() === normComponent
-    );
-    if(!comp){
-      comp = { id: uid(), format, page, component, createdAt: Date.now() };
-      state.data.components.push(comp);
-    }
+    // O servidor cuida de achar ou criar o mapeamento, para não duplicar
+    // nem sobrescrever o que outra pessoa criou nesse meio tempo.
+    const componentRef = { format, page, component };
 
     if(editingBugId){
       // Modo edição: atualiza o bug existente, sem mexer em relator/status/histórico
-      const bug = state.data.bugs.find(b => b.id === editingBugId);
-      if(!bug){ toast('Esse bug não existe mais.'); newCompModal.classList.remove('open'); return; }
-      bug.componentId = comp.id;
-      bug.title = title;
-      bug.description = document.getElementById('f_desc').value.trim();
-      bug.severity = document.getElementById('f_sev').value;
-      bug.image = pendingNewBugImage || null;
-      await persistData();
+      const ok = await sendOp({
+        op: 'updateBug',
+        bugId: editingBugId,
+        component: componentRef,
+        fields: {
+          title,
+          description: document.getElementById('f_desc').value.trim(),
+          severity: document.getElementById('f_sev').value,
+          image: pendingNewBugImage || null,
+        },
+      });
 
       newCompModal.classList.remove('open');
       clearModalForm();
-      state.selectedPage = comp.page;
+      state.selectedPage = page;
       document.getElementById('allSearch').value = '';
       renderAll();
-      toast('Bug atualizado.');
+      if(ok) toast('Bug atualizado.');
       return;
     }
 
-    const bug = {
-      id: uid(),
-      componentId: comp.id,
-      title,
-      description: document.getElementById('f_desc').value.trim(),
-      severity: document.getElementById('f_sev').value,
-      status: 'Aberto',
-      reporter: reporterName,
-      createdAt: Date.now(),
-      image: pendingNewBugImage || null,
-    };
-    state.data.bugs.push(bug);
-    await persistData();
+    const ok = await sendOp({
+      op: 'createBug',
+      component: componentRef,
+      bug: {
+        id: uid(),
+        title,
+        description: document.getElementById('f_desc').value.trim(),
+        severity: document.getElementById('f_sev').value,
+        status: 'Aberto',
+        reporter: reporterName,
+        createdAt: Date.now(),
+        image: pendingNewBugImage || null,
+      },
+    });
 
     newCompModal.classList.remove('open');
     clearModalForm();
-    state.selectedPage = comp.page;
+    state.selectedPage = page;
     document.getElementById('allSearch').value = '';
     renderAll();
-    toast('Bug registrado.');
+    if(ok) toast('Bug registrado.');
   });
 
   // ---------- Init ----------
   (async function init(){
     await loadAll();
-
-    // ---- ZERAGEM ÚNICA ----
-    // Limpa TUDO que estiver salvo (bugs, mapeamentos e páginas), inclusive
-    // registros órfãos que não apareciam na tela. Roda uma única vez, na
-    // primeira abertura depois desta atualização, e se marca como concluída
-    // no próprio banco pra não apagar nada que o time criar depois.
-    const RESET_TAG = 'reset-2026-08-20';
-    if(state.data.resetTag !== RESET_TAG){
-      state.data = {
-        components: [],
-        bugs: [],
-        pages: [],
-        resetTag: RESET_TAG,
-      };
-      await persistData();
-      populatePageSelect();
-    }
-
     renderAll();
   })();
 })();
