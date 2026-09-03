@@ -253,6 +253,31 @@
     color: var(--content-always-light);
   }
   .btn.danger-solid:hover{ background: #a92e2e; border-color: #a92e2e; }
+  .log-modal-box{ max-width: 560px; }
+  .log-entry{
+    border-bottom: 1px solid var(--border-secondary);
+    padding: 10px 0;
+    font-size: var(--fs-p-m);
+  }
+  .log-entry:last-child{ border-bottom: none; }
+  .log-entry-top{ display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+  .log-entry-who{ font-weight:700; color: var(--content-primary); font-size: var(--fs-label-l); }
+  .log-entry-when{ color: var(--content-tertiary); font-size: var(--fs-label-s); white-space:nowrap; }
+  .log-entry-what{ color: var(--content-secondary); margin-top: 3px; }
+  .log-entry-what b{ color: var(--content-primary); font-weight:600; }
+  .log-alert{
+    margin-top: 4px;
+    font-size: var(--fs-label-m);
+    font-weight: 600;
+    color: var(--alert-error);
+    background: var(--tint-error);
+    border-radius: var(--radius-2xs);
+    padding: 3px 7px;
+    display: inline-block;
+  }
+  .log-empty{ color: var(--content-secondary); padding: 16px 0; text-align:center; }
+  .log-list-wrap{ max-height: 55vh; overflow-y:auto; }
+
   .delete-warning-text{ font-size: var(--fs-p-m); color: var(--content-secondary); margin: 0 0 14px; }
   .btn.block{ width:100%; justify-content:center; }
 
@@ -266,6 +291,7 @@
     gap:12px;
     flex-wrap:wrap;
   }
+  .topbar-actions{ display:flex; align-items:center; gap:8px; }
   .page-heading{
     font-size: var(--fs-h6);
     line-height: var(--lh-h6);
@@ -576,10 +602,16 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         </button>
       </div>
+      <div class="topbar-actions">
       <button class="btn secondary small" id="guideToggleBtn">
         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
         Guia rápido de teste
       </button>
+      <button class="btn secondary small" id="openLogBtn" title="Ver quem excluiu o quê">
+        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+        Histórico
+      </button>
+      </div>
     </div>
 
     <!-- All bugs view -->
@@ -719,6 +751,10 @@
     <h3>Excluir página</h3>
     <p class="delete-warning-text" id="deletePageWarning"></p>
     <div class="form-field">
+      <label>Seu nome</label>
+      <input id="deletePageBy" placeholder="Quem está excluindo" />
+    </div>
+    <div class="form-field">
       <label>Senha</label>
       <input type="password" id="deletePagePassword" placeholder="Senha de exclusão" />
     </div>
@@ -733,7 +769,11 @@
 <div class="modal-overlay" id="deleteBugModal">
   <div class="modal-box">
     <h3>Excluir bug</h3>
-    <p class="delete-warning-text">Essa ação não pode ser desfeita. Digite a senha pra confirmar.</p>
+    <p class="delete-warning-text">Essa ação não pode ser desfeita e fica registrada no histórico.</p>
+    <div class="form-field">
+      <label>Seu nome</label>
+      <input id="deleteBugBy" placeholder="Quem está excluindo" />
+    </div>
     <div class="form-field">
       <label>Senha</label>
       <input type="password" id="deleteBugPassword" placeholder="Senha de exclusão" />
@@ -741,6 +781,17 @@
     <div class="form-actions">
       <button class="btn block danger-solid" id="confirmDeleteBug">Excluir bug</button>
       <button class="btn secondary block" id="cancelDeleteBug">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: histórico de exclusões -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal-box log-modal-box">
+    <h3>Histórico de alterações</h3>
+    <div id="logList"></div>
+    <div class="form-actions">
+      <button class="btn secondary block" id="closeLog">Fechar</button>
     </div>
   </div>
 </div>
@@ -1013,12 +1064,19 @@
     }
   }
 
+  // Quem está usando a ferramenta agora (campo Relator na lateral).
+  function currentUserName(){
+    const el = document.getElementById('reporterInput');
+    return (el && el.value.trim()) || state.reporterName || '';
+  }
+
   function normalizeState(s){
     const d = s && typeof s === 'object' ? s : {};
     return {
       components: Array.isArray(d.components) ? d.components : [],
       bugs: Array.isArray(d.bugs) ? d.bugs : [],
       pages: Array.isArray(d.pages) ? d.pages : [],
+      logs: Array.isArray(d.logs) ? d.logs : [],
     };
   }
 
@@ -1346,7 +1404,7 @@
         if(el.value === 'Resolvido' || el.value === 'Não existente'){
           openStatusNoteModal(bug, el.value);
         } else {
-          const ok = await sendOp({ op: 'updateBug', bugId: bug.id, fields: { status: el.value } });
+          const ok = await sendOp({ op: 'updateBug', bugId: bug.id, fields: { status: el.value }, by: currentUserName() });
           renderAll();
           if(ok) toast('Status atualizado.');
         }
@@ -1478,7 +1536,7 @@
       fields[cfg.atField] = Date.now();
       fields[cfg.imageField] = pendingResolveImage || null;
       fields[cfg.byField] = byName;
-      await sendOp({ op: 'updateBug', bugId: bug.id, fields });
+      await sendOp({ op: 'updateBug', bugId: bug.id, fields, by: byName });
     }
     pendingStatusBugId = null;
     pendingStatus = null;
@@ -1517,7 +1575,7 @@
     const exists = state.data.pages.some(p => p.toLowerCase() === name.toLowerCase());
     if(exists){ toast('Essa página já existe.'); return; }
 
-    const ok = await sendOp({ op: 'addPage', name });
+    const ok = await sendOp({ op: 'addPage', name, by: currentUserName() });
     newPageModal.classList.remove('open');
     populatePageSelect();
     renderAll();
@@ -1543,8 +1601,9 @@
     document.getElementById('deletePageWarning').textContent =
       `Isso vai apagar a página "${pageName}" e todos os ${bugCount} bug${bugCount===1?'':'s'} relacionados a ela. Essa ação não pode ser desfeita. Digite a senha pra confirmar.`;
     document.getElementById('deletePagePassword').value = '';
+    document.getElementById('deletePageBy').value = state.reporterName || '';
     deletePageModal.classList.add('open');
-    document.getElementById('deletePagePassword').focus();
+    document.getElementById('deletePageBy').focus();
   }
 
   document.getElementById('cancelDeletePage').addEventListener('click', () => {
@@ -1553,6 +1612,8 @@
   });
 
   document.getElementById('confirmDeletePage').addEventListener('click', async () => {
+    const by = document.getElementById('deletePageBy').value.trim();
+    if(!by){ toast('Informe seu nome para registrar quem excluiu.'); document.getElementById('deletePageBy').focus(); return; }
     const pwd = document.getElementById('deletePagePassword').value;
     if(pwd !== CREATE_PAGE_PASSWORD){
       toast('Senha incorreta.');
@@ -1561,7 +1622,7 @@
       return;
     }
     const pageName = pendingDeletePage;
-    await sendOp({ op: 'deletePage', name: pageName });
+    await sendOp({ op: 'deletePage', name: pageName, by });
 
     if(state.selectedPage === pageName){
       state.selectedPage = null;
@@ -1585,8 +1646,9 @@
   function openDeleteBugModal(bugId){
     pendingDeleteBugId = bugId;
     document.getElementById('deleteBugPassword').value = '';
+    document.getElementById('deleteBugBy').value = state.reporterName || '';
     deleteBugModal.classList.add('open');
-    document.getElementById('deleteBugPassword').focus();
+    document.getElementById('deleteBugBy').focus();
   }
 
   document.getElementById('cancelDeleteBug').addEventListener('click', () => {
@@ -1595,6 +1657,8 @@
   });
 
   document.getElementById('confirmDeleteBug').addEventListener('click', async () => {
+    const by = document.getElementById('deleteBugBy').value.trim();
+    if(!by){ toast('Informe seu nome para registrar quem excluiu.'); document.getElementById('deleteBugBy').focus(); return; }
     const pwd = document.getElementById('deleteBugPassword').value;
     if(pwd !== DELETE_PASSWORD){
       toast('Senha incorreta.');
@@ -1602,7 +1666,7 @@
       document.getElementById('deleteBugPassword').focus();
       return;
     }
-    const ok = await sendOp({ op: 'deleteBug', bugId: pendingDeleteBugId });
+    const ok = await sendOp({ op: 'deleteBug', bugId: pendingDeleteBugId, by });
     pendingDeleteBugId = null;
     deleteBugModal.classList.remove('open');
     renderAll();
@@ -1706,6 +1770,7 @@
       const ok = await sendOp({
         op: 'updateBug',
         bugId: editingBugId,
+        by: currentUserName(),
         component: componentRef,
         fields: {
           title,
@@ -1726,6 +1791,7 @@
 
     const ok = await sendOp({
       op: 'createBug',
+      by: reporterName,
       component: componentRef,
       bug: {
         id: uid(),
@@ -1745,6 +1811,80 @@
     document.getElementById('allSearch').value = '';
     renderAll();
     if(ok) toast('Bug registrado.');
+  });
+
+  // ---------- Histórico de exclusões ----------
+  function renderLog(){
+    const box = document.getElementById('logList');
+    const logs = Array.isArray(state.data.logs) ? state.data.logs : [];
+    if(logs.length === 0){
+      box.innerHTML = '<div class="log-empty">Nenhuma alteração registrada ainda.</div>';
+      return;
+    }
+
+    const nomes = {
+      createBug: 'cadastrou um bug',
+      updateBug: 'alterou um bug',
+      deleteBug: 'excluiu um bug',
+      addPage: 'criou uma página',
+      deletePage: 'excluiu uma página',
+      replaceAll: 'substituiu todos os dados',
+      restore: 'restaurou um backup',
+    };
+
+    box.innerHTML = '<div class="log-list-wrap">' + logs.map(l => {
+      const quando = new Date(l.at).toLocaleString('pt-BR');
+      const local = [l.format, l.page, l.component].filter(Boolean).join(' · ');
+      let oque;
+      if(l.action === 'deleteBug'){
+        oque = `excluiu o bug <b>${escapeHtml(l.title || '')}</b>` +
+               (local ? ` em ${escapeHtml(local)}` : '') +
+               (l.reporter ? ` · relatado por ${escapeHtml(l.reporter)}` : '');
+      } else if(l.action === 'deletePage'){
+        const n = l.bugsRemoved || 0;
+        oque = `excluiu a página <b>${escapeHtml(l.page || '')}</b> e ${n} bug${n===1?'':'s'} junto` +
+               (Array.isArray(l.titles) && l.titles.length ? `: ${escapeHtml(l.titles.join(', '))}` : '');
+      } else if(l.action === 'createBug'){
+        oque = `cadastrou o bug <b>${escapeHtml(l.title || '')}</b>` + (local ? ` em ${escapeHtml(local)}` : '');
+      } else if(l.action === 'updateBug'){
+        oque = (l.status ? `mudou para <b>${escapeHtml(l.status)}</b> o bug ` : 'alterou o bug ') +
+               `<b>${escapeHtml(l.title || '')}</b>` + (local ? ` em ${escapeHtml(local)}` : '');
+      } else if(l.action === 'addPage'){
+        oque = `criou a página <b>${escapeHtml(l.page || '')}</b>`;
+      } else {
+        oque = nomes[l.action] || `executou <b>${escapeHtml(l.action || '')}</b>`;
+      }
+
+      // Se a quantidade de bugs caiu, destacamos — é o sinal de que algo
+      // sumiu, mesmo que ninguém tenha excluído de propósito.
+      let alerta = '';
+      if(l.before && l.after){
+        const perdeu = l.before.bugs - l.after.bugs;
+        if(perdeu > 0){
+          alerta = `<div class="log-alert">↓ ${perdeu} bug${perdeu===1?'':'s'} a menos (de ${l.before.bugs} para ${l.after.bugs})</div>`;
+        }
+      }
+
+      return `<div class="log-entry">
+        <div class="log-entry-top">
+          <span class="log-entry-who">${escapeHtml(l.by || '—')}</span>
+          <span class="log-entry-when">${quando}</span>
+        </div>
+        <div class="log-entry-what">${oque}</div>
+        ${alerta}
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  document.getElementById('openLogBtn').addEventListener('click', async () => {
+    // Recarrega antes de mostrar, pra trazer exclusões feitas por outras pessoas
+    await loadAll();
+    renderAll();
+    renderLog();
+    document.getElementById('logModal').classList.add('open');
+  });
+  document.getElementById('closeLog').addEventListener('click', () => {
+    document.getElementById('logModal').classList.remove('open');
   });
 
   // ---------- Init ----------
