@@ -166,7 +166,7 @@ function findOrCreateComponent(state, comp) {
 
 /** Campos que o cliente pode gravar num bug — evita gravar lixo no banco. */
 const BUG_FIELDS = [
-  'title', 'description', 'severity', 'status', 'image',
+  'title', 'description', 'severity', 'status', 'image', 'os', 'browser',
   'resolution', 'resolvedAt', 'resolutionImage', 'resolvedBy',
   'notExistsReason', 'notExistsAt', 'notExistsImage', 'notExistsBy',
 ];
