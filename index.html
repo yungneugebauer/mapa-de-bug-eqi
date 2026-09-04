@@ -667,6 +667,19 @@
     <!-- Passo 2: detalhes do bug -->
     <div class="modal-step" id="modalStep2">
       <div class="modal-step2-context" id="modalStep2Context"></div>
+      <div class="form-field" id="osField">
+        <label>Sistema</label>
+        <select id="f_os">
+          <option value="" disabled selected>Onde foi visto?</option>
+          <option>iOS</option>
+          <option>Android</option>
+          <option>Ambos</option>
+        </select>
+      </div>
+      <div class="form-field" id="browserField">
+        <label>Navegador</label>
+        <input id="f_browser" placeholder="ex: Chrome 128, Safari, Edge" />
+      </div>
       <div class="form-field">
         <label>Componente (opcional)</label>
         <input id="newCompComponent" placeholder="ex: Botão Continuar" />
@@ -1184,7 +1197,8 @@
     const sevSlug = 'sev-' + bug.severity.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
     const statusSlug = slugStatus(bug.status);
     const comp = state.data.components.find(c => c.id === bug.componentId);
-    const pageLabel = comp ? `${comp.page} - ${comp.format.toUpperCase()}` : '(página removida)';
+    const osTag = bug.os ? ` · ${bug.os}` : (bug.browser ? ` · ${bug.browser}` : '');
+    const pageLabel = comp ? `${comp.page} - ${comp.format.toUpperCase()}${osTag}` : '(página removida)';
     return `
       <div class="bug-card ${sevSlug} status-${statusSlug}" data-bugid="${bug.id}">
         <div class="bug-top">
@@ -1205,6 +1219,14 @@
           </div>
         </div>
         <div class="bug-body" id="body-${bug.id}">
+          ${bug.os ? `
+          <div class="field-label">Sistema</div>
+          <p>${escapeHtml(bug.os)}</p>
+          ` : ''}
+          ${bug.browser ? `
+          <div class="field-label">Navegador</div>
+          <p>${escapeHtml(bug.browser)}</p>
+          ` : ''}
           ${comp && comp.component ? `
           <div class="field-label">Componente</div>
           <p>${escapeHtml(comp.component)}</p>
@@ -1285,6 +1307,8 @@
     document.getElementById('f_title').value = '';
     document.getElementById('f_desc').value = '';
     document.getElementById('f_sev').value = 'Bloqueante';
+    document.getElementById('f_os').value = '';
+    document.getElementById('f_browser').value = '';
     document.getElementById('dupWarning').classList.remove('show');
     document.getElementById('newBugImage').value = '';
     pendingNewBugImage = null;
@@ -1306,6 +1330,9 @@
     document.getElementById('f_title').value = bug.title || '';
     document.getElementById('f_desc').value = bug.description || '';
     document.getElementById('f_sev').value = bug.severity || 'Bloqueante';
+    document.getElementById('f_os').value = bug.os || '';
+    document.getElementById('f_browser').value = bug.browser || '';
+    updateOsFieldVisibility();
     document.getElementById('dupWarning').classList.remove('show');
 
     document.getElementById('newBugImage').value = '';
@@ -1679,6 +1706,16 @@
 
   const newCompModal = document.getElementById('newCompModal');
 
+  // Cada formato pede uma informação diferente: no App interessa o sistema
+  // (iOS/Android); no Web, o navegador onde o problema apareceu.
+  function updateOsFieldVisibility(){
+    const isApp = document.getElementById('newCompFormat').value === 'App';
+    document.getElementById('osField').style.display = isApp ? '' : 'none';
+    document.getElementById('browserField').style.display = isApp ? 'none' : '';
+    if(isApp) document.getElementById('f_browser').value = '';
+    else document.getElementById('f_os').value = '';
+  }
+
   function showModalStep(n){
     document.getElementById('modalStep1').classList.toggle('active', n === 1);
     document.getElementById('modalStep2').classList.toggle('active', n === 2);
@@ -1707,6 +1744,7 @@
     const page = document.getElementById('newCompPage').value;
     if(!page){ toast('Selecione a página.'); return; }
     document.getElementById('modalStep2Context').textContent = `${format} · ${page}`;
+    updateOsFieldVisibility();
     showModalStep(2);
     document.getElementById('f_title').focus();
     checkDuplicatesInModal();
@@ -1776,6 +1814,9 @@
           title,
           description: document.getElementById('f_desc').value.trim(),
           severity: document.getElementById('f_sev').value,
+          os: format === 'App' ? (document.getElementById('f_os').value || '') : '',
+        browser: format === 'Web' ? document.getElementById('f_browser').value.trim() : '',
+          browser: format === 'Web' ? document.getElementById('f_browser').value.trim() : '',
           image: pendingNewBugImage || null,
         },
       });
@@ -1798,6 +1839,7 @@
         title,
         description: document.getElementById('f_desc').value.trim(),
         severity: document.getElementById('f_sev').value,
+        os: format === 'App' ? (document.getElementById('f_os').value || '') : '',
         status: 'Aberto',
         reporter: reporterName,
         createdAt: Date.now(),
