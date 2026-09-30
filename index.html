@@ -477,6 +477,8 @@
   .fmt-chip-btn:hover{ border-color: var(--content-brand); color: var(--content-brand); }
   .fmt-chip-btn.active{ background: var(--content-brand); border-color: var(--content-brand); color: var(--content-always-light); }
   .fmt-chip-btn b{ font-weight:700; }
+  .fmt-chip-btn.resolved{ margin-left: auto; }
+  .fmt-chip-btn.resolved.active{ background: var(--alert-success); border-color: var(--alert-success); }
 
   .all-bugs-filters{ display:flex; gap:8px; margin-bottom: 16px; flex-wrap:wrap; }
   .all-bugs-filters select, .all-bugs-filters input{ font-size: var(--fs-p-m); }
@@ -624,6 +626,7 @@
           <option>Aberto</option>
           <option>Em andamento</option>
           <option>Resolvido</option>
+          <option>Não existente</option>
         </select>
         <select id="allSevFilter">
           <option value="">Todas severidades</option>
@@ -1352,6 +1355,11 @@
   }
 
   // ---------- All bugs view ----------
+  // Um chamado concluído é o que foi resolvido ou marcado como inexistente.
+  function isClosedStatus(status){
+    return status === 'Resolvido' || status === 'Não existente';
+  }
+
   function renderAllBugsView(){
     document.getElementById('pageHeading').textContent = state.selectedPage || 'Todas as páginas';
     document.getElementById('deleteCurrentPageBtn').style.display = state.selectedPage ? 'inline-flex' : 'none';
@@ -1376,21 +1384,22 @@
     if(statusF) baseBugs = baseBugs.filter(b => b.status === statusF);
     if(sevF) baseBugs = baseBugs.filter(b => b.severity === sevF);
 
-    // Barra de chips Web/App com contagem — reflete a página/busca atual,
-    // então funciona tanto ao entrar numa página quanto em "Todos os bugs"
-    const webCount = baseBugs.filter(b => {
+    // Chamados já concluídos (resolvidos ou marcados como não existentes)
+    // saem da lista principal para não poluir; ficam na aba "Resolvidos".
+    const abertos = baseBugs.filter(b => !isClosedStatus(b.status));
+    const concluidos = baseBugs.filter(b => isClosedStatus(b.status));
+
+    const countByFormat = (arr, fmt) => arr.filter(b => {
       const comp = state.data.components.find(c => c.id === b.componentId);
-      return comp && comp.format === 'Web';
+      return comp && comp.format === fmt;
     }).length;
-    const appCount = baseBugs.filter(b => {
-      const comp = state.data.components.find(c => c.id === b.componentId);
-      return comp && comp.format === 'App';
-    }).length;
+
     const chipBar = document.getElementById('formatChipBar');
     chipBar.innerHTML = `
-      <button type="button" class="fmt-chip-btn ${state.formatFilter === '' ? 'active' : ''}" data-format="">Todos <b>${baseBugs.length}</b></button>
-      <button type="button" class="fmt-chip-btn ${state.formatFilter === 'Web' ? 'active' : ''}" data-format="Web">Web <b>${webCount}</b></button>
-      <button type="button" class="fmt-chip-btn ${state.formatFilter === 'App' ? 'active' : ''}" data-format="App">App <b>${appCount}</b></button>
+      <button type="button" class="fmt-chip-btn ${state.formatFilter === '' ? 'active' : ''}" data-format="">Todos <b>${abertos.length}</b></button>
+      <button type="button" class="fmt-chip-btn ${state.formatFilter === 'Web' ? 'active' : ''}" data-format="Web">Web <b>${countByFormat(abertos,'Web')}</b></button>
+      <button type="button" class="fmt-chip-btn ${state.formatFilter === 'App' ? 'active' : ''}" data-format="App">App <b>${countByFormat(abertos,'App')}</b></button>
+      <button type="button" class="fmt-chip-btn resolved ${state.formatFilter === 'resolvidos' ? 'active' : ''}" data-format="resolvidos">Resolvidos <b>${concluidos.length}</b></button>
     `;
     chipBar.querySelectorAll('.fmt-chip-btn').forEach(el => {
       el.addEventListener('click', () => {
@@ -1399,14 +1408,21 @@
       });
     });
 
-    let bugs = baseBugs;
-    if(state.formatFilter) bugs = bugs.filter(b => {
-      const comp = state.data.components.find(c => c.id === b.componentId);
-      return comp && comp.format === state.formatFilter;
-    });
+    let bugs;
+    if(state.formatFilter === 'resolvidos'){
+      bugs = concluidos;
+    } else {
+      bugs = abertos;
+      if(state.formatFilter) bugs = bugs.filter(b => {
+        const comp = state.data.components.find(c => c.id === b.componentId);
+        return comp && comp.format === state.formatFilter;
+      });
+    }
 
     if(bugs.length === 0){
-      wrap.innerHTML = '<div class="empty-state">Nenhum bug encontrado. Use "+ Novo Bug" pra registrar o primeiro.</div>';
+      wrap.innerHTML = state.formatFilter === 'resolvidos'
+        ? '<div class="empty-state">Nenhum chamado concluído ainda.</div>'
+        : '<div class="empty-state">Nenhum bug em aberto. Use "+ Novo Bug" pra registrar um.</div>';
       return;
     }
 
